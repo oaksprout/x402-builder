@@ -1,0 +1,20 @@
+{
+  "name": "x402-builder",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "x402 Builder - creates x402 services from text specs",
+  "main": "index.tsx",
+  "scripts": {
+    "dev": "bun run index.tsx",
+    "start": "bun run index.tsx"
+  },
+  "dependencies": {
+    "@jinn-network/mech-client-ts": "^0.0.6",
+    "hono": "^4.10.7",
+    "x402-hono": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
