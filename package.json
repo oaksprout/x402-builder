@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@coinbase/x402": "^1.0.0",
+    "@hono/node-server": "^1.19.7",
     "@jinn-network/mech-client-ts": "^0.0.6",
     "hono": "^4.10.7",
     "x402-hono": "^1.0.0"

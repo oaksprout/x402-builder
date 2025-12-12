@@ -24,15 +24,16 @@ import { facilitator } from "@coinbase/x402";
 const app = new Hono();
 app.use("/*", cors());
 
-// Environment
-const payTo = Bun.env.PAYMENT_WALLET_ADDRESS as `0x${string}` | undefined;
-const network = (Bun.env.X402_NETWORK || "base") as Network;
-const githubToken = Bun.env.GITHUB_TOKEN;
-const mechAddress = Bun.env.MECH_ADDRESS;
-const privateKey = Bun.env.PRIVATE_KEY;
-const ponderUrl = Bun.env.PONDER_GRAPHQL_URL || "http://localhost:42069/graphql";
-const chainConfig = Bun.env.CHAIN_CONFIG || "base";
-const rpcUrl = Bun.env.RPC_URL || Bun.env.BASE_LEDGER_RPC; // Paid RPC for reliable tx submission
+// Environment (compatible with both Bun and Node.js)
+const env = typeof Bun !== 'undefined' ? Bun.env : process.env;
+const payTo = env.PAYMENT_WALLET_ADDRESS as `0x${string}` | undefined;
+const network = (env.X402_NETWORK || "base") as Network;
+const githubToken = env.GITHUB_TOKEN;
+const mechAddress = env.MECH_ADDRESS;
+const privateKey = env.PRIVATE_KEY;
+const ponderUrl = env.PONDER_GRAPHQL_URL || "http://localhost:42069/graphql";
+const chainConfig = env.CHAIN_CONFIG || "base";
+// Note: RPC_URL is read directly by mech-client-ts (see config.js:87-90)
 
 // Base assertions added to all builds (unless blueprint provided)
 const BASE_ASSERTIONS = [
@@ -210,28 +211,8 @@ app.post("/build", async (c) => {
     // Dispatch to Jinn
     const jobDefinitionId = crypto.randomUUID();
     
-    // #region agent log - Hypothesis G: Monkey-patch mech-client to use paid RPC
-    // The mech-client doesn't support RPC override, so we patch the config module
-    if (rpcUrl) {
-      const configModule = await import("@jinn-network/mech-client-ts/dist/config.js");
-      const originalGetMechConfig = configModule.get_mech_config;
-      (configModule as any).get_mech_config = (chainConfigArg: string) => {
-        const originalConfig = originalGetMechConfig(chainConfigArg);
-        // Create new objects to avoid readonly property errors
-        const patchedLedgerConfig = originalConfig.ledger_config ? {
-          ...originalConfig.ledger_config,
-          address: rpcUrl,
-        } : undefined;
-        const patchedConfig = {
-          ...originalConfig,
-          rpc_url: rpcUrl,
-          ledger_config: patchedLedgerConfig,
-        };
-        console.log(`[x402-builder] Patched RPC URL to: ${rpcUrl}`);
-        return patchedConfig;
-      };
-    }
-    // #endregion
+    // Log the RPC URL being used (mech-client reads RPC_URL from env automatically)
+    console.log(`[x402-builder] Using RPC_URL from env: ${env.RPC_URL || 'not set (will use default)'}`);
     
     const { marketplaceInteract } = await import("@jinn-network/mech-client-ts/dist/marketplace_interact.js");
 
@@ -403,11 +384,23 @@ function extractNameFromBlueprint(blueprint: Blueprint): string {
   return "x402-service";
 }
 
-// Start server
-const port = parseInt(Bun.env.PORT || "3000", 10);
+// Start server (compatible with both Bun and Node.js)
+const port = parseInt(env.PORT || "3000", 10);
 console.log(`x402 Builder running on :${port}`);
 
-Bun.serve({
-  port,
-  fetch: app.fetch,
-});
+if (typeof Bun !== 'undefined') {
+  Bun.serve({
+    port,
+    fetch: app.fetch,
+  });
+} else {
+  // Node.js: use @hono/node-server or built-in serve
+  import('@hono/node-server').then(({ serve }) => {
+    serve({ fetch: app.fetch, port });
+  }).catch(() => {
+    // Fallback: try hono's built-in serve
+    console.log('Starting with built-in serve...');
+    // @ts-ignore
+    app.listen(port);
+  });
+}
