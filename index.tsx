@@ -8,6 +8,11 @@
  * - spec: freeform text description
  * - blueprint: structured JSON with assertions array
  * 
+ * Blueprint Merging Strategy:
+ * - BASE_ASSERTIONS are ALWAYS included (generic x402 scaffolding)
+ * - User assertions are APPENDED (service-specific requirements)
+ * - User context describes WHAT to build, base assertions describe HOW
+ * 
  * Deploy: Railway Functions (Bun runtime)
  * 
  * Required env vars for x402 payments:
@@ -35,43 +40,92 @@ const ponderUrl = env.PONDER_GRAPHQL_URL || "http://localhost:42069/graphql";
 const chainConfig = env.CHAIN_CONFIG || "base";
 // Note: RPC_URL is read directly by mech-client-ts (see config.js:87-90)
 
-// Base assertions added to all builds (unless blueprint provided)
+// Base assertions - ALWAYS included for any x402 service build
+// These are generic HOW-TO-BUILD assertions, not service-specific
 const BASE_ASSERTIONS = [
   {
-    id: "SCAFFOLD-001",
-    assertion: "Scaffold as Hono app with x402-hono middleware",
+    id: "BASE-SCAFFOLD-001",
+    assertion: "Scaffold as Hono app with x402-hono middleware. Create .gitignore FIRST before any yarn install.",
     examples: {
-      do: ["Create .gitignore first", "Use x402-hono paymentMiddleware", "moduleResolution: bundler"],
-      dont: ["Use Express", "Skip .gitignore before yarn install"]
+      do: [
+        "Create .gitignore first excluding node_modules/, dist/, .env, *.log",
+        "Use x402-hono paymentMiddleware for paid routes",
+        "Create tsconfig.json with moduleResolution: 'bundler' (required for x402-hono)",
+        "Include package.json with hono, @hono/node-server, x402-hono dependencies"
+      ],
+      dont: [
+        "Use Express, Fastify, or other frameworks",
+        "Skip .gitignore before yarn install (causes token overflow)",
+        "Use moduleResolution: 'nodenext' (x402-hono has broken type exports)"
+      ]
     },
-    commentary: "Hono + x402-hono is the standard stack"
+    commentary: "Hono + x402-hono is the standard x402 stack. .gitignore must be created FIRST."
   },
   {
-    id: "X402-001",
-    assertion: "Paid endpoints must use x402-hono paymentMiddleware",
+    id: "BASE-X402-001",
+    assertion: "Paid endpoints must use x402-hono paymentMiddleware with PAYMENT_WALLET_ADDRESS from env.",
     examples: {
-      do: ["Configure with PAYMENT_WALLET_ADDRESS env", "Return 402 for unpaid requests"],
-      dont: ["Hardcode wallet addresses", "Skip payment verification"]
+      do: [
+        "Configure paymentMiddleware with price and network from env",
+        "Return proper 402 Payment Required response",
+        "Use 'base' network for mainnet, 'base-sepolia' for testnet"
+      ],
+      dont: [
+        "Hardcode wallet addresses",
+        "Skip payment verification",
+        "Allow unpaid access to paid endpoints"
+      ]
     },
-    commentary: "x402 is the monetization mechanism"
+    commentary: "x402 payment is the monetization mechanism for all paid endpoints."
   },
   {
-    id: "DEPLOY-001",
-    assertion: "Include railway.json for Railway deployment",
+    id: "BASE-DEPLOY-001",
+    assertion: "Include railway.json for Railway deployment with NIXPACKS builder and health check.",
     examples: {
-      do: ["Use NIXPACKS builder", "Set healthcheckPath: /health"],
-      dont: ["Omit deployment config"]
+      do: [
+        "Include railway.json with NIXPACKS builder",
+        "Set healthcheckPath to '/health'",
+        "Document required env vars in .env.example"
+      ],
+      dont: [
+        "Omit deployment config",
+        "Hardcode environment-specific values"
+      ]
     },
-    commentary: "Railway deployment config for one-click deploy"
+    commentary: "Railway deployment config enables one-click deployment."
   },
   {
-    id: "BUILD-001",
-    assertion: "Service must build: yarn install && yarn build must succeed",
+    id: "BASE-BUILD-001",
+    assertion: "Service must compile: 'yarn install' and 'yarn build' must both succeed without errors.",
     examples: {
-      do: ["Fix all TypeScript errors", "Verify dependencies resolve"],
-      dont: ["Ignore build errors", "Use ts-ignore"]
+      do: [
+        "Run yarn install and verify completion",
+        "Run yarn build and verify TypeScript compiles",
+        "Fix type errors before proceeding"
+      ],
+      dont: [
+        "Proceed if build fails",
+        "Use ts-ignore to suppress errors",
+        "Skip build verification"
+      ]
     },
-    commentary: "Build verification catches issues before runtime"
+    commentary: "Build verification catches issues before runtime."
+  },
+  {
+    id: "BASE-RUN-001",
+    assertion: "Service must start: 'yarn start' must launch server and respond to /health with 200 OK.",
+    examples: {
+      do: [
+        "Run yarn start and verify server starts",
+        "Test curl http://localhost:PORT/health returns 200",
+        "Include GET /health endpoint returning { status: 'ok' }"
+      ],
+      dont: [
+        "Assume server starts without testing",
+        "Skip health endpoint"
+      ]
+    },
+    commentary: "Runtime verification confirms the service actually works."
   }
 ];
 
@@ -119,11 +173,11 @@ app.get("/", (c) => c.json({
       payment: "$0.001", 
       network, 
       body: { 
-        spec: "string? - freeform text description",
+        spec: "string? - freeform text description of what to build",
         blueprint: "object? - structured { assertions: [...], context?: string }",
         name: "string? - service name (auto-extracted if omitted)" 
       },
-      note: "Provide either spec OR blueprint, not both"
+      note: "BASE_ASSERTIONS (scaffolding) are always included. User assertions are appended for service-specific requirements."
     },
     "GET /status/:jobId": { payment: "free" },
     "GET /health": { payment: "free" }
@@ -186,25 +240,41 @@ app.post("/build", async (c) => {
       }
     }
 
-    // Build final blueprint
+    // Build final blueprint - ALWAYS include BASE_ASSERTIONS
     let finalBlueprint: Blueprint;
     
     if (userBlueprint) {
-      // Use user's blueprint directly, append repo context
+      // Merge: BASE_ASSERTIONS + user assertions
+      // Filter out any user assertions that duplicate base IDs
+      const baseIds = new Set(BASE_ASSERTIONS.map(a => a.id));
+      const userAssertionsFiltered = userBlueprint.assertions.filter(a => !baseIds.has(a.id));
+      
       finalBlueprint = {
-        assertions: userBlueprint.assertions,
+        assertions: [...BASE_ASSERTIONS, ...userAssertionsFiltered],
         context: [
-          userBlueprint.context || '',
+          '## Service Specification',
           '',
-          '## Repository',
+          userBlueprint.context || '(No additional context provided)',
+          '',
+          '## Target Repository',
           repo.html_url,
-        ].filter(Boolean).join('\n')
+          '',
+          '## Build Instructions',
+          'Use the BASE-* assertions for scaffolding. Use service-specific assertions for functionality.',
+        ].join('\n')
       };
     } else {
-      // Build from freeform spec
+      // Build from freeform spec - only BASE_ASSERTIONS
       finalBlueprint = {
         assertions: BASE_ASSERTIONS,
-        context: `## User Specification\n\n${spec}\n\n## Repository\n${repo.html_url}`
+        context: [
+          '## Service Specification',
+          '',
+          spec,
+          '',
+          '## Target Repository', 
+          repo.html_url,
+        ].join('\n')
       };
     }
 
@@ -218,7 +288,7 @@ app.post("/build", async (c) => {
       tools: ["web_search", "create_artifact", "write_file", "read_file", "replace", "list_directory", "run_shell_command", "dispatch_new_job"],
       ipfsJsonContents: [{
         blueprint: JSON.stringify(finalBlueprint),
-        jobName: `Build ${serviceName} – ${shortId}`,
+        jobName: `Build: ${serviceName}`,
         model: "gemini-2.5-flash",
         jobDefinitionId,
         nonce: crypto.randomUUID(),
@@ -242,6 +312,11 @@ app.post("/build", async (c) => {
       repoUrl: repo.html_url,
       statusUrl: `${baseUrl}/status/${requestId}`,
       explorerUrl: `https://explorer.jinn.network/workstreams/${requestId}`,
+      assertionCount: {
+        base: BASE_ASSERTIONS.length,
+        user: userBlueprint?.assertions.length || 0,
+        total: finalBlueprint.assertions.length,
+      }
     }, 201);
 
   } catch (e: any) {
@@ -311,21 +386,43 @@ async function createGitHubRepo(name: string, token: string) {
 
 // Helper: Extract service name from freeform spec
 function extractServiceName(spec: string): string {
-  const match = spec.match(/(?:build|create)\s+(?:a|an)?\s*([a-z0-9-]+)\s+(?:service|api)/i);
+  // Try to find "build X service" or "create X api" pattern
+  const match = spec.match(/(?:build|create)\s+(?:a|an|the)?\s*([a-z0-9-]+)\s+(?:service|api)/i);
   if (match?.[1]) return match[1].toLowerCase().replace(/[^a-z0-9-]/g, "");
+  
+  // Fallback: use first few words
   return spec.slice(0, 30).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "x402-service";
 }
 
 // Helper: Extract service name from blueprint
 function extractNameFromBlueprint(blueprint: Blueprint): string {
-  // Try to find name in context
-  const contextMatch = blueprint.context?.match(/(?:service|api|project)[:\s]+([a-z0-9-]+)/i);
-  if (contextMatch?.[1]) return contextMatch[1].toLowerCase();
+  const context = blueprint.context || '';
   
-  // Try to extract from first assertion
-  const firstAssertion = blueprint.assertions[0]?.assertion || '';
-  const assertionMatch = firstAssertion.match(/([a-z0-9-]+)\s+(?:service|api)/i);
-  if (assertionMatch?.[1]) return assertionMatch[1].toLowerCase();
+  // 1. Try to extract from GitHub repo URL in context
+  const repoMatch = context.match(/github\.com\/[^\/]+\/([a-z0-9_-]+)/i);
+  if (repoMatch?.[1]) {
+    // Clean up the repo name (remove common prefixes/suffixes)
+    let name = repoMatch[1].toLowerCase();
+    name = name.replace(/^(x402-|the-|my-)/, '').replace(/(-service|-api)$/, '');
+    if (name.length >= 2) return name;
+  }
+  
+  // 2. Try to find explicit "service: name" or "project: name" pattern
+  const explicitMatch = context.match(/(?:service|project|name)[:\s]+([a-z0-9-]+)/i);
+  if (explicitMatch?.[1]) return explicitMatch[1].toLowerCase();
+  
+  // 3. Try to extract from first assertion that mentions a service name
+  for (const assertion of blueprint.assertions) {
+    // Look for "X service" or "X api" pattern
+    const assertionMatch = assertion.assertion.match(/(?:the\s+)?([a-z0-9-]+)\s+(?:service|api|endpoint)/i);
+    if (assertionMatch?.[1] && assertionMatch[1].length > 2) {
+      const name = assertionMatch[1].toLowerCase();
+      // Skip generic words
+      if (!['the', 'this', 'a', 'an', 'hono', 'x402'].includes(name)) {
+        return name;
+      }
+    }
+  }
   
   return "x402-service";
 }
