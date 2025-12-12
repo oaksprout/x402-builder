@@ -210,22 +210,50 @@ app.post("/build", async (c) => {
     const jobDefinitionId = crypto.randomUUID();
     const { marketplaceInteract } = await import("@jinn-network/mech-client-ts/dist/marketplace_interact.js");
 
-    const result = await marketplaceInteract({
-      prompts: [JSON.stringify(finalBlueprint)],
-      priorityMech: mechAddress,
-      tools: ["web_search", "create_artifact", "write_file", "read_file", "replace", "list_directory", "run_shell_command", "dispatch_new_job"],
-      ipfsJsonContents: [{
-        blueprint: JSON.stringify(finalBlueprint),
-        jobName: `Build ${serviceName} – ${shortId}`,
-        model: "gemini-2.5-flash",
-        jobDefinitionId,
-        nonce: crypto.randomUUID(),
-      }],
+    // #region agent log - Hypothesis A,C,D: Log dispatch params for debugging
+    const dispatchDiagnostics = {
+      mechAddress,
       chainConfig,
-      keyConfig: { source: "value", value: privateKey },
-      postOnly: true,
-      responseTimeout: 300,
-    });
+      privateKeyPrefix: privateKey?.substring(0, 10) + '...',
+      privateKeyLength: privateKey?.length,
+      repoUrl: repo.html_url,
+      jobDefinitionId,
+    };
+    console.log('[x402-builder] Dispatch diagnostics:', JSON.stringify(dispatchDiagnostics));
+    // #endregion
+
+    let result;
+    try {
+      result = await marketplaceInteract({
+        prompts: [JSON.stringify(finalBlueprint)],
+        priorityMech: mechAddress,
+        tools: ["web_search", "create_artifact", "write_file", "read_file", "replace", "list_directory", "run_shell_command", "dispatch_new_job"],
+        ipfsJsonContents: [{
+          blueprint: JSON.stringify(finalBlueprint),
+          jobName: `Build ${serviceName} – ${shortId}`,
+          model: "gemini-2.5-flash",
+          jobDefinitionId,
+          nonce: crypto.randomUUID(),
+        }],
+        chainConfig,
+        keyConfig: { source: "value", value: privateKey },
+        postOnly: true,
+        responseTimeout: 300,
+      });
+    } catch (dispatchErr: any) {
+      // #region agent log - Hypothesis A-E: Capture detailed dispatch error
+      console.error('[x402-builder] marketplaceInteract failed:', dispatchErr);
+      // #endregion
+      return c.json({ 
+        error: "Dispatch failed", 
+        details: dispatchErr.message,
+        diagnostics: {
+          mechAddress,
+          chainConfig,
+          hint: "Check: 1) wallet ETH balance on Base, 2) RPC connectivity, 3) mech registration"
+        }
+      }, 500);
+    }
 
     if (!result?.request_ids?.[0]) {
       throw new Error("Dispatch failed: no request ID");
