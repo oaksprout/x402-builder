@@ -215,14 +215,20 @@ app.post("/build", async (c) => {
     if (rpcUrl) {
       const configModule = await import("@jinn-network/mech-client-ts/dist/config.js");
       const originalGetMechConfig = configModule.get_mech_config;
-      (configModule as any).get_mech_config = (chainConfig: string) => {
-        const config = originalGetMechConfig(chainConfig);
-        config.rpc_url = rpcUrl;
-        if (config.ledger_config) {
-          config.ledger_config.address = rpcUrl;
-        }
+      (configModule as any).get_mech_config = (chainConfigArg: string) => {
+        const originalConfig = originalGetMechConfig(chainConfigArg);
+        // Create new objects to avoid readonly property errors
+        const patchedLedgerConfig = originalConfig.ledger_config ? {
+          ...originalConfig.ledger_config,
+          address: rpcUrl,
+        } : undefined;
+        const patchedConfig = {
+          ...originalConfig,
+          rpc_url: rpcUrl,
+          ledger_config: patchedLedgerConfig,
+        };
         console.log(`[x402-builder] Patched RPC URL to: ${rpcUrl}`);
-        return config;
+        return patchedConfig;
       };
     }
     // #endregion
