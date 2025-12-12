@@ -241,16 +241,38 @@ app.post("/build", async (c) => {
         responseTimeout: 300,
       });
     } catch (dispatchErr: any) {
-      // #region agent log - Hypothesis A-E: Capture detailed dispatch error
-      console.error('[x402-builder] marketplaceInteract failed:', dispatchErr);
+      // #region agent log - Hypothesis F,G: Capture detailed dispatch error with stack
+      console.error('[x402-builder] marketplaceInteract failed:', {
+        message: dispatchErr.message,
+        code: dispatchErr.code,
+        cause: dispatchErr.cause?.message,
+        innerError: dispatchErr.innerError?.message,
+        data: dispatchErr.data,
+        stack: dispatchErr.stack?.split('\n').slice(0, 5).join('\n'),
+      });
       // #endregion
+      
+      // #region agent log - Hypothesis F: Test if config file is accessible
+      let configTest = 'untested';
+      try {
+        const { get_mech_config } = await import("@jinn-network/mech-client-ts/dist/config.js");
+        const cfg = get_mech_config('base');
+        configTest = cfg?.rpc_url ? `OK: ${cfg.rpc_url}` : 'MISSING RPC URL';
+      } catch (cfgErr: any) {
+        configTest = `CONFIG ERROR: ${cfgErr.message}`;
+      }
+      console.log('[x402-builder] Config test:', configTest);
+      // #endregion
+      
       return c.json({ 
         error: "Dispatch failed", 
         details: dispatchErr.message,
+        errorCode: dispatchErr.code,
+        configTest,
         diagnostics: {
           mechAddress,
           chainConfig,
-          hint: "Check: 1) wallet ETH balance on Base, 2) RPC connectivity, 3) mech registration"
+          hint: "Check: 1) wallet ETH balance on Base, 2) RPC connectivity, 3) mech registration, 4) config file bundling"
         }
       }, 500);
     }
