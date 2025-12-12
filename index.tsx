@@ -210,78 +210,24 @@ app.post("/build", async (c) => {
 
     // Dispatch to Jinn
     const jobDefinitionId = crypto.randomUUID();
-    
-    // Log the RPC URL being used (mech-client reads RPC_URL from env automatically)
-    console.log(`[x402-builder] Using RPC_URL from env: ${env.RPC_URL || 'not set (will use default)'}`);
-    
     const { marketplaceInteract } = await import("@jinn-network/mech-client-ts/dist/marketplace_interact.js");
 
-    // #region agent log - Hypothesis A,C,D: Log dispatch params for debugging
-    const dispatchDiagnostics = {
-      mechAddress,
+    const result = await marketplaceInteract({
+      prompts: [JSON.stringify(finalBlueprint)],
+      priorityMech: mechAddress,
+      tools: ["web_search", "create_artifact", "write_file", "read_file", "replace", "list_directory", "run_shell_command", "dispatch_new_job"],
+      ipfsJsonContents: [{
+        blueprint: JSON.stringify(finalBlueprint),
+        jobName: `Build ${serviceName} – ${shortId}`,
+        model: "gemini-2.5-flash",
+        jobDefinitionId,
+        nonce: crypto.randomUUID(),
+      }],
       chainConfig,
-      privateKeyPrefix: privateKey?.substring(0, 10) + '...',
-      privateKeyLength: privateKey?.length,
-      repoUrl: repo.html_url,
-      jobDefinitionId,
-    };
-    console.log('[x402-builder] Dispatch diagnostics:', JSON.stringify(dispatchDiagnostics));
-    // #endregion
-
-    let result;
-    try {
-      result = await marketplaceInteract({
-        prompts: [JSON.stringify(finalBlueprint)],
-        priorityMech: mechAddress,
-        tools: ["web_search", "create_artifact", "write_file", "read_file", "replace", "list_directory", "run_shell_command", "dispatch_new_job"],
-        ipfsJsonContents: [{
-          blueprint: JSON.stringify(finalBlueprint),
-          jobName: `Build ${serviceName} – ${shortId}`,
-          model: "gemini-2.5-flash",
-          jobDefinitionId,
-          nonce: crypto.randomUUID(),
-        }],
-        chainConfig,
-        keyConfig: { source: "value", value: privateKey },
-        postOnly: true,
-        responseTimeout: 300,
-      });
-    } catch (dispatchErr: any) {
-      // #region agent log - Hypothesis F,G: Capture detailed dispatch error with stack
-      console.error('[x402-builder] marketplaceInteract failed:', {
-        message: dispatchErr.message,
-        code: dispatchErr.code,
-        cause: dispatchErr.cause?.message,
-        innerError: dispatchErr.innerError?.message,
-        data: dispatchErr.data,
-        stack: dispatchErr.stack?.split('\n').slice(0, 5).join('\n'),
-      });
-      // #endregion
-      
-      // #region agent log - Hypothesis F: Test if config file is accessible
-      let configTest = 'untested';
-      try {
-        const { get_mech_config } = await import("@jinn-network/mech-client-ts/dist/config.js");
-        const cfg = get_mech_config('base');
-        configTest = cfg?.rpc_url ? `OK: ${cfg.rpc_url}` : 'MISSING RPC URL';
-      } catch (cfgErr: any) {
-        configTest = `CONFIG ERROR: ${cfgErr.message}`;
-      }
-      console.log('[x402-builder] Config test:', configTest);
-      // #endregion
-      
-      return c.json({ 
-        error: "Dispatch failed", 
-        details: dispatchErr.message,
-        errorCode: dispatchErr.code,
-        configTest,
-        diagnostics: {
-          mechAddress,
-          chainConfig,
-          hint: "Check: 1) wallet ETH balance on Base, 2) RPC connectivity, 3) mech registration, 4) config file bundling"
-        }
-      }, 500);
-    }
+      keyConfig: { source: "value", value: privateKey },
+      postOnly: true,
+      responseTimeout: 300,
+    });
 
     if (!result?.request_ids?.[0]) {
       throw new Error("Dispatch failed: no request ID");
