@@ -16,7 +16,7 @@ app.use("/*", cors());
 
 // Environment
 const payTo = Bun.env.PAYMENT_WALLET_ADDRESS as `0x${string}` | undefined;
-const network = (Bun.env.X402_NETWORK || "base-sepolia") as Network;
+const network = (Bun.env.X402_NETWORK || "base") as Network;
 const githubToken = Bun.env.GITHUB_TOKEN;
 const mechAddress = Bun.env.MECH_ADDRESS;
 const privateKey = Bun.env.PRIVATE_KEY;
@@ -69,7 +69,7 @@ const BASE_BLUEPRINT = {
 if (payTo) {
   app.use("/build", paymentMiddleware(payTo, {
     "/build": {
-      price: "$1.00",
+      price: "$0.001",
       network,
       config: { description: "Build a new x402 service" }
     }
@@ -87,8 +87,9 @@ app.get("/health", (c) => c.json({
 app.get("/", (c) => c.json({
   name: "x402 Builder",
   description: "Build x402 services from text specs",
+  network,
   endpoints: {
-    "POST /build": { payment: "$1.00", body: { spec: "string", name: "string?" } },
+    "POST /build": { payment: "$0.001", network, body: { spec: "string", name: "string?" } },
     "GET /status/:jobId": { payment: "free" },
     "GET /health": { payment: "free" }
   }
