@@ -9,11 +9,17 @@
  * - blueprint: structured JSON with assertions array
  * 
  * Deploy: Railway Functions (Bun runtime)
+ * 
+ * Required env vars for x402 payments:
+ * - PAYMENT_WALLET_ADDRESS: Address to receive payments
+ * - CDP_API_KEY_ID: Coinbase Developer Platform key ID
+ * - CDP_API_KEY_SECRET: Coinbase Developer Platform key secret
  */
 
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { paymentMiddleware, type Network } from "x402-hono";
+import { facilitator } from "@coinbase/x402";
 
 const app = new Hono();
 app.use("/*", cors());
@@ -79,15 +85,19 @@ interface Blueprint {
   context?: string;
 }
 
-// Payment middleware for /build
+// Payment middleware for /build - uses Coinbase facilitator
 if (payTo) {
-  app.use("/build", paymentMiddleware(payTo, {
-    "/build": {
-      price: "$0.001",
-      network,
-      config: { description: "Build a new x402 service" }
-    }
-  }));
+  app.use("/build", paymentMiddleware(
+    payTo,
+    {
+      "/build": {
+        price: "$0.001",
+        network,
+        config: { description: "Build a new x402 service" }
+      }
+    },
+    facilitator  // Coinbase facilitator for payment verification
+  ));
 }
 
 // Health check
